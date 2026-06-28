@@ -1,0 +1,6 @@
+{
+  "name": "The 90s Breeze - AI Automation Hub",
+  "description": "An AI-powered content factory for 90s Indian music video creation and Instagram/YouTube automation, including discovery, asset management, caption generation, and publishing schedules.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+/* Scoped dark mode overrides to transform light theme components into premium dark theme */
+.dark {
+  /* Background overrides */
+  .bg-white {
+    background-color: var(--color-slate-900) !important;
+  }
+  .bg-slate-50 {
+    background-color: var(--color-slate-950) !important;
+  }
+  .bg-slate-50\/50 {
+    background-color: rgba(15, 23, 42, 0.4) !important;
+  }
+  .bg-indigo-50 {
+    background-color: rgba(30, 41, 59, 0.5) !important;
+  }
+  .bg-indigo-50\/50 {
+    background-color: rgba(30, 41, 59, 0.3) !important;
+  }
+  .bg-indigo-100 {
+    background-color: var(--color-indigo-950) !important;
+  }
+  .bg-indigo-100\/60 {
+    background-color: rgba(30, 41, 59, 0.6) !important;
+  }
+  .bg-orange-50 {
+    background-color: rgba(249, 115, 22, 0.1) !important;
+  }
+  .bg-blue-50 {
+    background-color: rgba(59, 130, 246, 0.1) !important;
+  }
+  .bg-pink-50 {
+    background-color: rgba(236, 72, 153, 0.1) !important;
+  }
+  .bg-emerald-50 {
+    background-color: rgba(16, 185, 129, 0.1) !important;
+  }
+
+  /* Border overrides */
+  .border-slate-200 {
+    border-color: var(--color-slate-800) !important;
+  }
+  .border-slate-200\/80 {
+    border-color: rgba(51, 65, 85, 0.8) !important;
+  }
+  .border-slate-100 {
+    border-color: var(--color-slate-800) !important;
+  }
+  .border-indigo-100 {
+    border-color: var(--color-indigo-900) !important;
+  }
+  .border-indigo-200 {
+    border-color: var(--color-indigo-950) !important;
+  }
+  .border-indigo-200\/50 {
+    border-color: rgba(99, 102, 241, 0.3) !important;
+  }
+  .border-orange-200 {
+    border-color: rgba(249, 115, 22, 0.3) !important;
+  }
+  .border-blue-200 {
+    border-color: rgba(59, 130, 246, 0.3) !important;
+  }
+  .border-pink-200 {
+    border-color: rgba(236, 72, 153, 0.3) !important;
+  }
+  .border-emerald-200 {
+    border-color: rgba(16, 185, 129, 0.3) !important;
+  }
+
+  /* Text color overrides */
+  .text-slate-900 {
+    color: var(--color-slate-100) !important;
+  }
+  .text-slate-800 {
+    color: var(--color-slate-200) !important;
+  }
+  .text-slate-700 {
+    color: var(--color-slate-300) !important;
+  }
+  .text-slate-600 {
+    color: var(--color-slate-400) !important;
+  }
+  .text-slate-500 {
+    color: var(--color-slate-400) !important;
+  }
+  .text-slate-400 {
+    color: var(--color-slate-500) !important;
+  }
+  
+  .text-indigo-600 {
+    color: var(--color-indigo-400) !important;
+  }
+  .text-indigo-700 {
+    color: var(--color-indigo-300) !important;
+  }
+  .text-indigo-800 {
+    color: var(--color-indigo-200) !important;
+  }
+  .text-indigo-950 {
+    color: var(--color-slate-100) !important;
+  }
+  .text-orange-800 {
+    color: var(--color-orange-400) !important;
+  }
+  .text-blue-800 {
+    color: var(--color-blue-400) !important;
+  }
+  .text-pink-800 {
+    color: var(--color-pink-400) !important;
+  }
+  .text-emerald-800 {
+    color: var(--color-emerald-400) !important;
+  }
+  .text-emerald-700 {
+    color: var(--color-emerald-400) !important;
+  }
+
+  /* Form controls focus-states & placeholders */
+  .focus\:bg-white:focus {
+    background-color: var(--color-slate-950) !important;
+    border-color: var(--color-indigo-500) !important;
+    color: var(--color-slate-100) !important;
+  }
+  .placeholder-slate-400::placeholder {
+    color: var(--color-slate-600) !important;
+  }
+
+  /* Select and option dropdown elements */
+  select option {
+    background-color: var(--color-slate-900) !important;
+    color: var(--color-slate-100) !important;
+  }
+}
