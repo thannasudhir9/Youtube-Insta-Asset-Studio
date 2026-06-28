@@ -91,7 +91,23 @@ Renders calendar interfaces to track content outputs:
 
 ---
 
-## ⚡ Section 6: Future Headless APIs, MCP Servers, and Advanced AI Automation
+### 6. Storage & Cache Optimization Engine (`/src/lib/cleanupUtils.ts` & `ConfigView.tsx`)
+A local cache garbage collection routine that dynamically cleans up space:
+*   **Timestamp Alignment:** Parses varying date string formats (including standard local dates and custom download tags like `" (DL)"`) via `parseSavedAt`.
+*   **Safety Guards (Curation Mode):** Checks against user-curated records (represented by a standard `isCurated: boolean` flag) and active Google Drive records. These assets are protected against deletions.
+*   **Automated Scheduling:** Plugs directly into the root `useEffect` cycle in `App.tsx` to automatically optimize the database index upon application startup if the master toggle is enabled in settings.
+
+---
+
+### 7. Centralized Toast Notification HUD (`/src/components/ToastContext.tsx`)
+A global overlay notification HUD engineered using standard React context providers:
+*   **Context API Injection:** Wraps around the main layout tree allowing any deep child element to invoke structured alerts easily via the custom `useToast()` hook.
+*   **Aesthetic Alert Categories:** Features success, error, and general info modes styled in deep-charcoal backgrounds, custom borders, and smooth entrance slide animations.
+*   **Full Background Integration:** Seamlessly triggers critical operations alerts for 'Download Complete' (during offline assets download/export), 'Sync to Drive Success' (upon full Google Drive backups), and 'API Configuration Updated' (when modifying keys/tokens in ConfigView).
+
+---
+
+## ⚡ Section 8: Future Headless APIs, MCP Servers, and Advanced AI Automation
 
 To transition `@the90s_breeze AI Music Automation Factory` from an interactive browser dashboard into a fully programmatic, agent-driven content factory, the following headless endpoints and Model Context Protocol (MCP) specifications are planned for future engineering phases.
 

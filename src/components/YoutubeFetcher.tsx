@@ -803,7 +803,7 @@ ${analyzedData.translatedLyrics}
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
-      toast.success("Successfully saved clip to local database & downloaded loop package!");
+      toast.success("Download Complete! Successfully saved clip to local database & downloaded loop package!");
     } else {
       // Save to Google Drive
       const token = await getAccessToken();
@@ -863,7 +863,7 @@ ${analyzedData.translatedLyrics}
 
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 3000);
-        toast.success("Successfully uploaded & synced viral hook to Google Drive!");
+        toast.success("Sync to Drive Success! Successfully uploaded & synced viral hook to Google Drive.");
         await syncGoogleDrive(); // refresh drive list
       } catch (err: any) {
         console.error("Error saving to Drive: ", err);
@@ -905,7 +905,7 @@ ${analyzedData.translatedLyrics}
     URL.revokeObjectURL(url);
     setDownloadSuccess(true);
     setTimeout(() => setDownloadSuccess(false), 3000);
-    toast.success("Successfully exported clip JSON package to local files!");
+    toast.success("Download Complete! Successfully exported clip JSON package to local files.");
 
     // Register this downloaded clip directly in the IndexedDB database so it's searchable and previewable offline
     try {

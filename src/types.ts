@@ -64,5 +64,6 @@ export interface StoredAsset {
   hookStart: number;
   hookEnd: number;
   savedAt: string;
+  isCurated?: boolean;
   data: AnalyzedAsset;
 }

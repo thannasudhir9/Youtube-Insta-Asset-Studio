@@ -67,7 +67,8 @@ The @the90s_breeze app follows an asynchronous, secure full-stack pipeline:
 *   `AICreativeLabs.tsx`: Experiments with background textures and custom watercolor graphics.
 *   `AnalyticsView.tsx`: Monitors engagement metrics, views, and automated performance ratings.
 *   `ScriptsExporter.tsx`: Provides clean shell command copyables for offline operations.
-*   `ConfigView.tsx`: Customizes API settings, credentials, and Cloud Storage providers.
+*   `ConfigView.tsx`: Customizes API settings, credentials, Cloud Storage providers, and manages **Auto-Cleanup** cache optimization tools.
+*   `ToastContext.tsx`: Powers a global, elegant toast notification HUD designed to alert users immediately of operations like "Download Complete", "Sync to Drive Success", and "API Configuration Updated".
 
 ---
 
@@ -76,6 +77,7 @@ The @the90s_breeze app follows an asynchronous, secure full-stack pipeline:
 To guarantee durability and ease of access:
 1.  **Durable Cloud Persistence (Firebase Firestore):** Synchronizes schedule queues, user records, and custom configurations safely across multiple devices upon Google Authentication.
 2.  **Transient Offline Indexing (IndexedDB):** Implements an IndexedDB-backed key-value layer (`src/lib/indexedDb.ts`) to store processed clips offline instantly. This ensures high-performance retrieval and preview capabilities even in low-connectivity scenarios.
+    *   **Auto-Cleanup & Curation:** Includes robust storage management to automatically prune temporary cache assets older than 30 days. High-impact or favorited clips can be flagged as **★ Curated**, which protects them from scheduled or manual cleanup sweeps.
 3.  **Local Memory State:** Coordinates component variables via React hooks, using primitive hooks to prevent infinite re-render loops.
 
 ---

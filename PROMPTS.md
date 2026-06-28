@@ -77,6 +77,28 @@ A comprehensive record of user-driven requirements, prompt histories, developmen
 
 ---
 
+### ⏱️ Phase 8: Storage Optimization & Curation Controls
+*   **Timestamp:** `2026-06-28T04:21:26-07:00`
+*   **Prompt Input:**
+    > "Create a settings option in the ConfigView to enable 'Auto-Cleanup' for local assets, which clears temporary cache files older than 30 days to free up storage space while keeping curated viral hooks."
+*   **Engineering Deliverables:**
+    *   Extended `StoredAsset` interface schema inside `/src/types.ts` with an optional `isCurated` flag.
+    *   Integrated star buttons (using Lucide `Star` icons) on card layouts in `AssetStudio.tsx` to toggle curation status, storing records to IndexedDB and synchronizing local browser indexes.
+    *   Coded `src/lib/cleanupUtils.ts` containing the garbage collection scanning routine protecting curated assets while deleting older clips.
+    *   Added cache optimization dashboard controls and manual triggers to `ConfigView.tsx` with scheduled silent boot calls in `App.tsx`.
+
+---
+
+### ⏱️ Phase 9: Centralized Operations Toast System
+*   **Timestamp:** `2026-06-28T04:26:39-07:00`
+*   **Prompt Input:**
+    > "Implement a centralized Toast notification system that triggers visual alerts for all successful background operations, specifically for 'Download Complete', 'Sync to Drive Success', and 'API Configuration Updated'."
+*   **Engineering Deliverables:**
+    *   Integrated success/error triggers inside `ConfigView.tsx` and `YoutubeFetcher.tsx` calling the custom `useToast()` context handler.
+    *   Formed explicit, clean alert labels for offline savings, local package downloads, Google Drive updates, and credential updates.
+
+---
+
 ## ⚡ Future AI-Driven Roadmap, Headless APIs & MCP Servers
 
 To evolve `@the90s_breeze` into a headless, highly programmable content factory, the following roadmap details the engineering specifications for upcoming development phases.

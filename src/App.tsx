@@ -29,6 +29,7 @@ import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, signInWithGoogle, logout, db } from "./lib/firebase";
 import { collection, query, where, getDocs, setDoc, deleteDoc, doc } from "firebase/firestore";
 import { ToastProvider } from "./components/ToastContext";
+import { performAutoCleanup } from "./lib/cleanupUtils";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>("architecture");
@@ -63,6 +64,23 @@ export default function App() {
     updateTime();
     const interval = setInterval(updateTime, 60000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Trigger Auto-Cleanup on boot if enabled in settings
+  useEffect(() => {
+    const isEnabled = localStorage.getItem("the90s_Breeze_auto_cleanup_enabled") === "true";
+    if (isEnabled) {
+      console.log("[Auto-Cleanup] Running scheduled boot cache cleanup...");
+      performAutoCleanup()
+        .then((res) => {
+          if (res.deletedCount > 0) {
+            console.log(`[Auto-Cleanup] Cleaned ${res.deletedCount} expired assets. Kept ${res.keptCount} assets.`);
+          } else {
+            console.log(`[Auto-Cleanup] Cache is clean. Total active clips: ${res.keptCount}.`);
+          }
+        })
+        .catch((err) => console.error("[Auto-Cleanup] Failed to execute boot cleanup:", err));
+    }
   }, []);
 
   // Monitor auth status and load synchronized queue items from Firestore

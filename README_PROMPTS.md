@@ -73,3 +73,25 @@ A chronological record of user-driven requirements, prompt histories, and timest
 *   **Engineering Output:**
     *   Documented an exhaustive future engineering roadmap covering Model Context Protocol (MCP) servers, Headless JSON-RPC & REST APIs, and automated video render queues.
     *   Updated `/README_PROMPTS.md`, `/README_FEATURES.md`, and `/README.md` with deep specifications detailing how developers can turn this content automation factory into a fully headless, agent-driven orchestration layer.
+
+---
+
+### ⏱️ Phase 8: Storage Optimization & Curation Controls
+*   **Timestamp:** `2026-06-28T04:21:26-07:00`
+*   **Prompt Input:**
+    > "Create a settings option in the ConfigView to enable 'Auto-Cleanup' for local assets, which clears temporary cache files older than 30 days to free up storage space while keeping curated viral hooks."
+*   **Engineering Output:**
+    *   Extended `/src/types.ts` `StoredAsset` interface with an optional `isCurated` flag.
+    *   Designed and embedded curation buttons (using Lucide-react `Star` icons) within the Asset Gallery cards in `AssetStudio.tsx` to toggle and synchronize curated status.
+    *   Engineered a modular optimization utility `src/lib/cleanupUtils.ts` to scan, differentiate, and prune expired temporary local assets while protecting curated items.
+    *   Implemented full-featured control layouts and live status statistics inside `ConfigView.tsx` with scheduled silent boot executions in `App.tsx`.
+
+---
+
+### ⏱️ Phase 9: Centralized Operations Toast System
+*   **Timestamp:** `2026-06-28T04:26:39-07:00`
+*   **Prompt Input:**
+    > "Implement a centralized Toast notification system that triggers visual alerts for all successful background operations, specifically for 'Download Complete', 'Sync to Drive Success', and 'API Configuration Updated'."
+*   **Engineering Output:**
+    *   Wired centralized success, error, and info triggers from the high-fidelity `useToast` context across `ConfigView.tsx` and `YoutubeFetcher.tsx`.
+    *   Configured explicit notification tags including **"Download Complete! Successfully saved..."**, **"Sync to Drive Success! Successfully uploaded..."**, and **"API Configuration Updated!"** to offer clean user-facing operational logs.

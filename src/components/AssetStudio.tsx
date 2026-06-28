@@ -29,7 +29,8 @@ import {
   CloudUpload,
   Music,
   Search,
-  Filter
+  Filter,
+  Star
 } from "lucide-react";
 import { TrendItem, QueueItem, StoredAsset } from "../types";
 import { useToast } from "./ToastContext";
@@ -366,6 +367,44 @@ export default function AssetStudio({
     } catch (err) {
       console.error("Failed to delete asset:", err);
       toast.error("Failed to delete asset.");
+    }
+  };
+
+  const handleToggleCurate = async (asset: StoredAsset) => {
+    try {
+      const isCurated = !asset.isCurated;
+      const updatedAsset = { ...asset, isCurated };
+      
+      // Save to IndexedDB
+      await saveAssetToOfflineDB(updatedAsset);
+      
+      // Update state
+      setProcessedVideos(prev => prev.map(v => v.id === asset.id ? updatedAsset : v));
+      
+      if (selectedVideo?.id === asset.id) {
+        setSelectedVideo(updatedAsset);
+      }
+      
+      // Synchronize to localStorage key used by YoutubeFetcher
+      const localStr = localStorage.getItem("the90s_Breeze_local_assets");
+      if (localStr) {
+        try {
+          const localAssets: StoredAsset[] = JSON.parse(localStr);
+          const updatedLocal = localAssets.map(v => v.id === asset.id ? updatedAsset : v);
+          localStorage.setItem("the90s_Breeze_local_assets", JSON.stringify(updatedLocal));
+        } catch (e) {
+          console.error("Failed to sync curation to localStorage local_assets", e);
+        }
+      }
+
+      if (isCurated) {
+        toast.success(`"${asset.title}" marked as a curated viral hook!`);
+      } else {
+        toast.info(`"${asset.title}" removed from curated viral hooks.`);
+      }
+    } catch (err) {
+      console.error("Failed to toggle curation:", err);
+      toast.error("Failed to update curation state.");
     }
   };
 
@@ -1359,6 +1398,17 @@ export default function AssetStudio({
                             </button>
                             
                             <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleToggleCurate(asset)}
+                                className={`p-1.5 rounded-lg transition cursor-pointer ${
+                                  asset.isCurated 
+                                    ? "text-amber-500 bg-amber-50 hover:bg-amber-100" 
+                                    : "text-slate-400 hover:text-amber-500 hover:bg-amber-50/50"
+                                }`}
+                                title={asset.isCurated ? "Curated Hook (Click to Unmark)" : "Mark as Curated Hook"}
+                              >
+                                <Star className={`w-2.5 h-2.5 ${asset.isCurated ? "fill-amber-500" : ""}`} />
+                              </button>
                               <button
                                 onClick={() => handleStartRename(asset)}
                                 className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition cursor-pointer"
