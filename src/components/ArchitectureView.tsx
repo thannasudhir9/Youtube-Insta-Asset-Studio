@@ -11,11 +11,14 @@ import {
   Cpu,
   Layers,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 export default function ArchitectureView() {
   const [activeStep, setActiveStep] = useState<number>(0);
+  const [showPolicy, setShowPolicy] = useState<boolean>(false);
 
   const steps = [
     {
@@ -167,50 +170,81 @@ export default function ArchitectureView() {
       </div>
 
       {/* Safety & Legality Warning Box */}
-      <div className="p-6 bg-rose-50 border border-rose-100 rounded-2xl space-y-4">
-        <div className="flex items-start gap-4">
-          <div className="p-2.5 bg-rose-100 border border-rose-200 rounded-xl text-rose-600 shrink-0">
-            <ShieldAlert className="w-6 h-6" />
+      <div className="bg-rose-50/40 dark:bg-rose-950/10 border border-rose-200/50 dark:border-rose-900/20 rounded-2xl overflow-hidden transition-all duration-300">
+        {/* Toggle Header */}
+        <button
+          onClick={() => setShowPolicy(!showPolicy)}
+          className="w-full flex items-center justify-between p-5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-left transition cursor-pointer"
+        >
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="p-2 bg-rose-100 dark:bg-rose-900/30 border border-rose-200/60 dark:border-rose-900/30 rounded-xl text-rose-600 dark:text-rose-400 shrink-0">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex flex-wrap items-center gap-2">
+                Crucial Policy & Fair-Use Standards
+                <span className="px-2 py-0.5 text-[8px] font-mono text-rose-750 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/40 border border-rose-200/50 dark:border-rose-900/30 rounded uppercase font-extrabold tracking-wider">
+                  Critical Warning
+                </span>
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                Understand algorithmic safety, copyright guidelines, shadowban policies, and regional fair use standards.
+              </p>
+            </div>
           </div>
-          <div className="space-y-1">
-            <h4 className="text-md font-bold text-slate-900 flex items-center gap-2">
-              Crucial Policy & Fair-Use Standards
-              <span className="px-2 py-0.5 text-[10px] font-mono text-rose-700 bg-rose-100 border border-rose-200 rounded-md uppercase font-bold">
-                CRITICAL WARNING
-              </span>
-            </h4>
-            <p className="text-xs text-rose-700 leading-relaxed font-medium">
-              Instagram and YouTube algorithms strictly scan and punish content duplication. Automating the direct re-uploading of copyrighted videos, removing existing watermarks, or using direct unedited songs without licensing is a guaranteed path to account suspensions, shadowbans, and permanent bans.
-            </p>
+          
+          <div className="flex items-center gap-2 shrink-0 ml-4 px-3 py-1.5 bg-white dark:bg-slate-900 border border-rose-200/60 dark:border-rose-800/20 hover:border-indigo-500/30 rounded-xl shadow-xs transition text-[10px] font-mono font-black uppercase tracking-wider text-rose-600 dark:text-rose-400">
+            {showPolicy ? (
+              <>
+                <EyeOff className="w-3.5 h-3.5 text-rose-500" />
+                <span>Hide Policy</span>
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5 text-rose-500" />
+                <span>Show Policy</span>
+              </>
+            )}
           </div>
-        </div>
+        </button>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-          <div className="p-4 bg-white border border-rose-100 rounded-xl shadow-sm space-y-2">
-            <div className="flex items-center gap-2 text-rose-600 font-mono text-xs uppercase font-bold">
-              <AlertTriangle className="w-4 h-4" />
-              Strictly Prohibited
+        {/* Collapsible Content */}
+        {showPolicy && (
+          <div className="p-6 pt-0 border-t border-rose-100 dark:border-rose-900/20 space-y-4 animate-fadeIn">
+            <div className="pt-4">
+              <p className="text-xs text-rose-700 dark:text-rose-300 leading-relaxed font-medium">
+                Instagram and YouTube algorithms strictly scan and punish content duplication. Automating the direct re-uploading of copyrighted videos, removing existing watermarks, or using direct unedited songs without licensing is a guaranteed path to account suspensions, shadowbans, and permanent bans.
+              </p>
             </div>
-            <ul className="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
-              <li>Downloading other creators' reels and stripping watermarks.</li>
-              <li>Re-uploading full music videos directly from YouTube.</li>
-              <li>Using complete songs without editing or transforming.</li>
-              <li>Over-tagging irrelevant trending hashtags to gain fake views.</li>
-            </ul>
-          </div>
-          <div className="p-4 bg-white border border-emerald-100 rounded-xl shadow-sm space-y-2">
-            <div className="flex items-center gap-2 text-emerald-600 font-mono text-xs uppercase font-bold">
-              <CheckCircle className="w-4 h-4" />
-              Highly Recommended & Safe
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              <div className="p-4 bg-white dark:bg-slate-900/60 border border-rose-100 dark:border-rose-900/30 rounded-xl shadow-xs space-y-2">
+                <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-mono text-[10px] uppercase font-bold tracking-wider">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Strictly Prohibited
+                </div>
+                <ul className="text-xs text-slate-650 dark:text-slate-350 space-y-1.5 list-disc pl-4 leading-relaxed">
+                  <li>Downloading other creators' reels and stripping watermarks.</li>
+                  <li>Re-uploading full music videos directly from YouTube.</li>
+                  <li>Using complete songs without editing or transforming.</li>
+                  <li>Over-tagging irrelevant trending hashtags to gain fake views.</li>
+                </ul>
+              </div>
+              <div className="p-4 bg-white dark:bg-slate-900/60 border border-emerald-100 dark:border-emerald-900/35 rounded-xl shadow-xs space-y-2">
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-450 font-mono text-[10px] uppercase font-bold tracking-wider">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Highly Recommended & Safe
+                </div>
+                <ul className="text-xs text-slate-650 dark:text-slate-350 space-y-1.5 list-disc pl-4 leading-relaxed">
+                  <li>Using <strong className="text-slate-800 dark:text-white font-semibold">watermark-free Portrait stock videos</strong> (misty roads, rainy cafes, nostalgic train views) or custom generated AI backdrops.</li>
+                  <li>Limiting music cuts to high-impact hook segments of <strong className="text-slate-800 dark:text-white font-semibold">10-30 seconds</strong> (Fair Use safe limits).</li>
+                  <li>Adding unique visual value through <strong className="text-slate-800 dark:text-white font-semibold">scrolling lyrics translation overlays</strong> and custom retro VHS grain effects.</li>
+                  <li>Inviting audience engagement with conversational, nostalgic captions.</li>
+                </ul>
+              </div>
             </div>
-            <ul className="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
-              <li>Using <strong className="text-slate-800">watermark-free Portrait stock videos</strong> (e.g., misty roads, rainy cafes, nostalgic train views) from Pexels or custom generated AI backdrops.</li>
-              <li>Limiting music cuts to high-impact hook segments of <strong className="text-slate-800">10-30 seconds</strong> (Fair Use safe limits).</li>
-              <li>Adding unique visual value through <strong className="text-slate-800">scrolling lyrics translation overlays</strong> and custom retro VHS grain effects.</li>
-              <li>Inviting audience engagement with conversational, nostalgic captions.</li>
-            </ul>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

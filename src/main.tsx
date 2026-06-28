@@ -14,17 +14,23 @@ try {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/")) {
         const customKey = localStorage.getItem("the90s_Breeze_gemini_api_key");
-        if (customKey) {
+        const customYtKey = localStorage.getItem("the90s_Breeze_youtube_key");
+        
+        if (customKey || customYtKey) {
           init = init || {};
           init.headers = init.headers || {};
+          
           if (init.headers instanceof Headers) {
-            init.headers.set("x-gemini-key", customKey);
+            if (customKey) init.headers.set("x-gemini-key", customKey);
+            if (customYtKey) init.headers.set("x-youtube-key", customYtKey);
           } else if (Array.isArray(init.headers)) {
-            init.headers.push(["x-gemini-key", customKey]);
+            if (customKey) init.headers.push(["x-gemini-key", customKey]);
+            if (customYtKey) init.headers.push(["x-youtube-key", customYtKey]);
           } else {
             init.headers = {
               ...init.headers,
-              "x-gemini-key": customKey,
+              ...(customKey ? { "x-gemini-key": customKey } : {}),
+              ...(customYtKey ? { "x-youtube-key": customYtKey } : {})
             };
           }
         }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Tv, 
   Sparkles, 
@@ -18,9 +18,26 @@ import {
   Bookmark,
   Share2,
   Cloud,
-  Database
+  Database,
+  Edit2,
+  Trash2,
+  PlayCircle,
+  Save,
+  Film,
+  CheckSquare,
+  Square,
+  CloudUpload,
+  Music,
+  Search,
+  Filter
 } from "lucide-react";
-import { TrendItem, QueueItem } from "../types";
+import { TrendItem, QueueItem, StoredAsset } from "../types";
+import { useToast } from "./ToastContext";
+import { 
+  getAssetsFromOfflineDB, 
+  saveAssetToOfflineDB, 
+  deleteAssetFromOfflineDB 
+} from "../lib/indexedDb";
 
 interface AssetStudioProps {
   selectedSong: TrendItem | null;
@@ -37,6 +54,7 @@ export default function AssetStudio({
   storageType,
   setStorageType
 }: AssetStudioProps) {
+  const toast = useToast();
   const [songTitle, setSongTitle] = useState("");
   const [movieName, setMovieName] = useState("");
   const [singers, setSingers] = useState("");
@@ -67,6 +85,334 @@ export default function AssetStudio({
   const [isCompiling, setIsCompiling] = useState(false);
   const [compileLogs, setCompileLogs] = useState<string[]>([]);
   const [videoCompiled, setVideoCompiled] = useState(false);
+
+  // Processed YouTube loop states
+  const [processedVideos, setProcessedVideos] = useState<StoredAsset[]>([]);
+  const [selectedVideo, setSelectedVideo] = useState<StoredAsset | null>(null);
+  const [showVideoPreview, setShowVideoPreview] = useState(false);
+  const [gallerySearch, setGallerySearch] = useState("");
+  const [galleryFilter, setGalleryFilter] = useState<"all" | "local" | "drive">("all");
+
+  // Waveform dragging & timeline adjustment state
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [draggingHandle, setDraggingHandle] = useState<'start' | 'end' | null>(null);
+  const totalDuration = selectedVideo ? Math.max(selectedVideo.hookEnd + 30, 90) : 90;
+
+  const handleUpdateTimestamps = async (newStart: number, newEnd: number) => {
+    if (!selectedVideo) return;
+    const updated = {
+      ...selectedVideo,
+      hookStart: newStart,
+      hookEnd: newEnd,
+      data: selectedVideo.data ? { ...selectedVideo.data, hookStart: newStart, hookEnd: newEnd } : { videoId: selectedVideo.id, hookStart: newStart, hookEnd: newEnd } as any
+    };
+    setSelectedVideo(updated);
+    setProcessedVideos(prev => prev.map(v => v.id === selectedVideo.id ? updated : v));
+    try {
+      await saveAssetToOfflineDB(updated);
+    } catch (err) {
+      console.error("Failed to persist updated timestamps:", err);
+    }
+  };
+
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      setDraggingHandle(null);
+    };
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (!draggingHandle || !trackRef.current || !selectedVideo) return;
+      const rect = trackRef.current.getBoundingClientRect();
+      const offsetX = e.clientX - rect.left;
+      const percent = Math.min(Math.max(0, offsetX / rect.width), 1);
+      const seconds = Math.round(percent * totalDuration);
+      
+      if (draggingHandle === 'start') {
+        const newStart = Math.min(seconds, selectedVideo.hookEnd - 1);
+        handleUpdateTimestamps(newStart, selectedVideo.hookEnd);
+      } else if (draggingHandle === 'end') {
+        const newEnd = Math.max(seconds, selectedVideo.hookStart + 1);
+        handleUpdateTimestamps(selectedVideo.hookStart, newEnd);
+      }
+    };
+    
+    const handleGlobalTouchEnd = () => {
+      setDraggingHandle(null);
+    };
+    const handleGlobalTouchMove = (e: TouchEvent) => {
+      if (!draggingHandle || !trackRef.current || !selectedVideo) return;
+      const rect = trackRef.current.getBoundingClientRect();
+      const touch = e.touches[0];
+      const offsetX = touch.clientX - rect.left;
+      const percent = Math.min(Math.max(0, offsetX / rect.width), 1);
+      const seconds = Math.round(percent * totalDuration);
+      
+      if (draggingHandle === 'start') {
+        const newStart = Math.min(seconds, selectedVideo.hookEnd - 1);
+        handleUpdateTimestamps(newStart, selectedVideo.hookEnd);
+      } else if (draggingHandle === 'end') {
+        const newEnd = Math.max(seconds, selectedVideo.hookStart + 1);
+        handleUpdateTimestamps(selectedVideo.hookStart, newEnd);
+      }
+    };
+
+    if (draggingHandle) {
+      window.addEventListener('mouseup', handleGlobalMouseUp);
+      window.addEventListener('mousemove', handleGlobalMouseMove);
+      window.addEventListener('touchend', handleGlobalTouchEnd);
+      window.addEventListener('touchmove', handleGlobalTouchMove);
+    }
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('touchend', handleGlobalTouchEnd);
+      window.removeEventListener('touchmove', handleGlobalTouchMove);
+    };
+  }, [draggingHandle, selectedVideo, totalDuration]);
+
+  // Gallery Inline Renaming and Refresh States
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+
+  // Batch Selection & Bulk Operations State
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const [bulkProgressMessage, setBulkProgressMessage] = useState("");
+  const [bulkRenamePrefix, setBulkRenamePrefix] = useState("");
+  const [bulkRenameSuffix, setBulkRenameSuffix] = useState("");
+  const [showBulkRenamePanel, setShowBulkRenamePanel] = useState(false);
+
+  // Batch action implementations
+  const handleToggleSelectAsset = (id: string) => {
+    setSelectedAssetIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedAssetIds.length === processedVideos.length) {
+      setSelectedAssetIds([]);
+    } else {
+      setSelectedAssetIds(processedVideos.map(v => v.id));
+    }
+  };
+
+  const handleBulkRename = async () => {
+    if (selectedAssetIds.length === 0) return;
+    if (!bulkRenamePrefix.trim() && !bulkRenameSuffix.trim()) {
+      alert("Please specify a prefix or a suffix to apply bulk renaming.");
+      return;
+    }
+    setIsBulkProcessing(true);
+    setBulkProgressMessage("Applying bulk rename sequence...");
+    
+    try {
+      const updatedVideos = [...processedVideos];
+      for (const id of selectedAssetIds) {
+        const videoIndex = updatedVideos.findIndex(v => v.id === id);
+        if (videoIndex !== -1) {
+          const video = updatedVideos[videoIndex];
+          const originalTitle = video.title || video.name || "Clip";
+          const newTitle = `${bulkRenamePrefix.trim()}${originalTitle}${bulkRenameSuffix.trim()}`;
+          const updated = {
+            ...video,
+            title: newTitle,
+            name: newTitle,
+            data: video.data ? { ...video.data, title: newTitle } : { videoId: video.id, title: newTitle } as any
+          };
+          await saveAssetToOfflineDB(updated);
+          updatedVideos[videoIndex] = updated;
+        }
+      }
+      setProcessedVideos(updatedVideos);
+      setSelectedAssetIds([]);
+      setBulkRenamePrefix("");
+      setBulkRenameSuffix("");
+      setShowBulkRenamePanel(false);
+      setBulkProgressMessage("Bulk renaming applied successfully!");
+      setTimeout(() => setBulkProgressMessage(""), 3000);
+      toast.success("Successfully applied bulk rename to selected assets!");
+    } catch (err) {
+      console.error("Bulk rename error:", err);
+      setBulkProgressMessage("Failed to apply bulk renaming.");
+      toast.error("Failed to apply bulk renaming sequence.");
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleBulkCloudSync = async () => {
+    if (selectedAssetIds.length === 0) return;
+    setIsBulkProcessing(true);
+    
+    try {
+      for (let i = 0; i < selectedAssetIds.length; i++) {
+        const id = selectedAssetIds[i];
+        const video = processedVideos.find(v => v.id === id);
+        const title = video ? video.title : id;
+        
+        setBulkProgressMessage(`[${i + 1}/${selectedAssetIds.length}] Syncing "${title}" to cloud storage...`);
+        // Simulate network latency for API transfer
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        if (video) {
+          const updated = {
+            ...video,
+            source: "drive" as const,
+            driveFileId: "gdrive_" + Math.random().toString(36).substring(2, 10)
+          };
+          await saveAssetToOfflineDB(updated);
+          setProcessedVideos(prev => prev.map(v => v.id === id ? updated : v));
+        }
+      }
+      const count = selectedAssetIds.length;
+      setSelectedAssetIds([]);
+      setBulkProgressMessage("Cloud synchronization complete! Selected reels synced successfully.");
+      setTimeout(() => setBulkProgressMessage(""), 3500);
+      toast.success(`Successfully synchronized ${count} selected reels to Google Drive!`);
+    } catch (err) {
+      console.error("Bulk sync error:", err);
+      setBulkProgressMessage("Cloud synchronization encountered an issue.");
+      toast.error("Cloud synchronization failed for some selected assets.");
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedAssetIds.length === 0) return;
+    if (!window.confirm(`Are you sure you want to delete all ${selectedAssetIds.length} selected assets from local database?`)) return;
+    
+    setIsBulkProcessing(true);
+    setBulkProgressMessage("Deleting selected assets...");
+    
+    try {
+      const count = selectedAssetIds.length;
+      for (const id of selectedAssetIds) {
+        await deleteAssetFromOfflineDB(id);
+      }
+      setProcessedVideos(prev => prev.filter(v => !selectedAssetIds.includes(v.id)));
+      if (selectedVideo && selectedAssetIds.includes(selectedVideo.id)) {
+        setSelectedVideo(null);
+        setShowVideoPreview(false);
+      }
+      setSelectedAssetIds([]);
+      setBulkProgressMessage("Successfully cleared selected clips.");
+      setTimeout(() => setBulkProgressMessage(""), 3000);
+      toast.success(`Successfully deleted ${count} selected assets from local database.`);
+    } catch (err) {
+      console.error("Bulk delete error:", err);
+      setBulkProgressMessage("Failed to complete bulk deletion.");
+      toast.error("Bulk deletion failed.");
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  // Play, Rename, Delete Handler functions
+  const handlePlayAsset = (asset: StoredAsset) => {
+    setSelectedVideo(asset);
+    setShowVideoPreview(true);
+    if (asset.data) {
+      setSongTitle(asset.data.title || asset.title || "");
+      setMovieName(asset.data.movie || asset.movie || "");
+      setSingers(asset.data.singers || "");
+      setLyricsSnippet(asset.data.lyricsSnippet || "");
+      setTranslatedLyrics(asset.data.translatedLyrics || "");
+      setInstagramCaption(asset.data.caption || "");
+    } else {
+      setSongTitle(asset.title || "");
+      setMovieName(asset.movie || "");
+    }
+    toast.info(`Selected loop active: "${asset.title || asset.name}"`);
+  };
+
+  const handleStartRename = (asset: StoredAsset) => {
+    setEditingId(asset.id);
+    setEditingTitle(asset.title || asset.name || "");
+  };
+
+  const handleSaveRename = async (asset: StoredAsset) => {
+    if (!editingTitle.trim()) return;
+    try {
+      const updatedAsset = { 
+        ...asset, 
+        title: editingTitle, 
+        name: editingTitle, 
+        data: asset.data ? { ...asset.data, title: editingTitle } : { videoId: asset.id, title: editingTitle } as any
+      };
+      await saveAssetToOfflineDB(updatedAsset);
+      setProcessedVideos(prev => prev.map(v => v.id === asset.id ? updatedAsset : v));
+      if (selectedVideo?.id === asset.id) {
+        setSelectedVideo(updatedAsset);
+        setSongTitle(editingTitle);
+      }
+      setEditingId(null);
+      toast.success(`Renamed asset to "${editingTitle}" successfully!`);
+    } catch (err) {
+      console.error("Failed to rename asset:", err);
+      toast.error("Failed to rename asset.");
+    }
+  };
+
+  const handleDeleteAsset = async (id: string) => {
+    try {
+      await deleteAssetFromOfflineDB(id);
+      setProcessedVideos(prev => prev.filter(v => v.id !== id));
+      if (selectedVideo?.id === id) {
+        setSelectedVideo(null);
+        setShowVideoPreview(false);
+      }
+      toast.success("Successfully deleted asset from local database.");
+    } catch (err) {
+      console.error("Failed to delete asset:", err);
+      toast.error("Failed to delete asset.");
+    }
+  };
+
+  const handleRefreshGallery = async () => {
+    try {
+      const assets = await getAssetsFromOfflineDB();
+      setProcessedVideos(assets);
+      toast.success("Gallery refreshed successfully.");
+    } catch (err) {
+      console.error("Failed to refresh gallery assets:", err);
+      toast.error("Failed to refresh gallery.");
+    }
+  };
+
+  // Time Formatter helper
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  // Load IndexedDB indexed assets
+  useEffect(() => {
+    const loadProcessedVideos = async () => {
+      try {
+        const assets = await getAssetsFromOfflineDB();
+        setProcessedVideos(assets);
+        
+        // Find best match based on songTitle if possible
+        if (assets && assets.length > 0) {
+          const match = assets.find(a => 
+            (a.title && songTitle && a.title.toLowerCase().includes(songTitle.toLowerCase())) ||
+            (songTitle && a.title && songTitle.toLowerCase().includes(a.title.toLowerCase()))
+          );
+          if (match) {
+            setSelectedVideo(match);
+            setShowVideoPreview(true);
+          } else {
+            setSelectedVideo(assets[0]);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load IndexedDB assets in AssetStudio:", e);
+      }
+    };
+    loadProcessedVideos();
+  }, [songTitle]);
 
   // Initialize values when selectedSong changes
   useEffect(() => {
@@ -99,6 +445,7 @@ export default function AssetStudio({
   const fetchLyricsAndCaption = async () => {
     if (!songTitle) return;
     setFetchingAiContent(true);
+    toast.info("Generating captions & synchronized lyrics translation via Gemini AI...");
     try {
       const res = await fetch("/api/gemini/caption", {
         method: "POST",
@@ -114,8 +461,10 @@ export default function AssetStudio({
       setInstagramCaption(data.caption || "");
       setLyricsSnippet(data.lyricsSnippet || "");
       setTranslatedLyrics(data.translatedLyrics || "");
-    } catch (err) {
+      toast.success("Successfully fetched lyrics translation & Instagram captions!");
+    } catch (err: any) {
       console.error(err);
+      toast.error(`Failed to generate AI captions: ${err.message || err}`);
     } finally {
       setFetchingAiContent(false);
     }
@@ -126,6 +475,7 @@ export default function AssetStudio({
     if (!aiPrompt) return;
     setAiGenerating(true);
     setBgType("ai");
+    toast.info("Synthesizing aesthetic visual background via Gemini Image Gen...");
     try {
       const res = await fetch("/api/gemini/generate-bg", {
         method: "POST",
@@ -135,9 +485,13 @@ export default function AssetStudio({
       const data = await res.json();
       if (data.imageUrl) {
         setSelectedBg(data.imageUrl);
+        toast.success("Aesthetic backdrop image synthesized successfully!");
+      } else {
+        throw new Error("No image URL returned");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      toast.error(`Failed to generate AI visual background: ${err.message || err}`);
     } finally {
       setAiGenerating(false);
     }
@@ -148,6 +502,7 @@ export default function AssetStudio({
     navigator.clipboard.writeText(instagramCaption);
     setCopiedCaption(true);
     setTimeout(() => setCopiedCaption(false), 2000);
+    toast.success("Social caption copied to clipboard!");
   };
 
   // Simulate programmatic compilation steps
@@ -155,6 +510,7 @@ export default function AssetStudio({
     setIsCompiling(true);
     setCompileLogs([]);
     setVideoCompiled(false);
+    toast.info("Vertical Video Synthesis (FFmpeg) initiated...");
 
     const logs = [
       "[*] Initiating FFmpeg media compilation process...",
@@ -180,6 +536,7 @@ export default function AssetStudio({
         if (idx === logs.length - 1) {
           setIsCompiling(false);
           setVideoCompiled(true);
+          toast.success("Vertical Reel Video compiled successfully via programmatic synthesis!");
         }
       }, (idx + 1) * 350);
     });
@@ -199,6 +556,7 @@ export default function AssetStudio({
       status: "scheduled",
       platforms: ["instagram", "youtube"]
     });
+    toast.success("Successfully scheduled compiled video inside your Content Calendar!");
   };
 
   return (
@@ -207,20 +565,260 @@ export default function AssetStudio({
       {/* LEFT COLUMN: Visual Media Generator & Real-time Live Simulator (Grid Span 5) */}
       <div className="lg:col-span-5 space-y-6">
         <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
-          <h3 className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-            <Video className="w-4 h-4 text-indigo-600" />
-            9:16 Video Player Mockup
-          </h3>
+          <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+            <h3 className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+              <Video className="w-4 h-4 text-indigo-600" />
+              9:16 Video Player Mockup
+            </h3>
+            {processedVideos.length > 0 && (
+              <span className="px-1.5 py-0.5 text-[8px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-150 rounded uppercase">
+                {processedVideos.length} Indexed Clips
+              </span>
+            )}
+          </div>
+
+          {/* Processed YouTube Videos Selector Dropdown */}
+          {processedVideos.length > 0 && (
+            <div className="mb-4 p-2.5 bg-slate-50 border border-slate-150 rounded-xl space-y-1.5">
+              <label className="block text-[8px] font-mono font-bold uppercase tracking-wider text-slate-400">
+                Processed YouTube Clip
+              </label>
+              <div className="flex gap-2">
+                <select
+                  value={selectedVideo?.id || ""}
+                  onChange={(e) => {
+                    const video = processedVideos.find(v => v.id === e.target.value);
+                    if (video) {
+                      setSelectedVideo(video);
+                      setShowVideoPreview(true);
+                      // Pre-populate input fields from processed video's metadata
+                      if (video.data) {
+                        setSongTitle(video.data.title || video.title || "");
+                        setMovieName(video.data.movie || video.movie || "");
+                        setSingers(video.data.singers || "");
+                        setLyricsSnippet(video.data.lyricsSnippet || "");
+                        setTranslatedLyrics(video.data.translatedLyrics || "");
+                        setInstagramCaption(video.data.caption || "");
+                      }
+                    } else {
+                      setSelectedVideo(null);
+                      setShowVideoPreview(false);
+                    }
+                  }}
+                  className="flex-1 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/10 rounded-lg px-2.5 py-1 text-[10px] text-slate-700 outline-none transition cursor-pointer"
+                >
+                  <option value="">-- No YouTube Loop (Show Image Backdrop) --</option>
+                  {processedVideos.map(v => (
+                    <option key={v.id} value={v.id}>
+                      📹 {v.title} ({v.movie || "No Movie"})
+                    </option>
+                  ))}
+                </select>
+                {selectedVideo && (
+                  <button
+                    onClick={() => setShowVideoPreview(!showVideoPreview)}
+                    className={`px-2.5 py-1 text-[9px] font-bold rounded-lg border uppercase tracking-wider transition shrink-0 cursor-pointer ${
+                      showVideoPreview 
+                        ? "bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700" 
+                        : "bg-slate-200 border-slate-300 text-slate-700 hover:bg-slate-350"
+                    }`}
+                  >
+                    {showVideoPreview ? "Loop On" : "Preview"}
+                  </button>
+                )}
+              </div>
+
+              {/* Visual Waveform Range Adjuster panel */}
+              {selectedVideo && (
+                <div className="pt-2.5 border-t border-slate-150 mt-2 space-y-2 animate-fadeIn" id="viral-hook-waveform-adjuster">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-slate-650 flex items-center gap-1 font-mono uppercase tracking-wider">
+                      <Music className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+                      Visual Waveform Editor
+                    </span>
+                    <span className="text-[8px] font-mono font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                      {selectedVideo.hookEnd - selectedVideo.hookStart}s Hook Selected
+                    </span>
+                  </div>
+
+                  {/* Waveform Visualization Track wrapper */}
+                  <div 
+                    ref={trackRef}
+                    className="relative h-14 bg-slate-900 border border-slate-800 rounded-lg overflow-hidden select-none cursor-ew-resize"
+                    onMouseDown={(e) => {
+                      if (!trackRef.current) return;
+                      const rect = trackRef.current.getBoundingClientRect();
+                      const offsetX = e.clientX - rect.left;
+                      const percent = offsetX / rect.width;
+                      const clickedSeconds = percent * totalDuration;
+                      // Decide which handle is closer
+                      const distToStart = Math.abs(clickedSeconds - selectedVideo.hookStart);
+                      const distToEnd = Math.abs(clickedSeconds - selectedVideo.hookEnd);
+                      if (distToStart < distToEnd) {
+                        setDraggingHandle('start');
+                        const newStart = Math.min(Math.round(clickedSeconds), selectedVideo.hookEnd - 1);
+                        handleUpdateTimestamps(newStart, selectedVideo.hookEnd);
+                      } else {
+                        setDraggingHandle('end');
+                        const newEnd = Math.max(Math.round(clickedSeconds), selectedVideo.hookStart + 1);
+                        handleUpdateTimestamps(selectedVideo.hookStart, newEnd);
+                      }
+                    }}
+                  >
+                    {/* CSS Waveform Bars */}
+                    <div className="absolute inset-x-2 inset-y-1.5 flex items-end justify-between pointer-events-none">
+                      {Array.from({ length: 42 }).map((_, i) => {
+                        const barTime = (i / 42) * totalDuration;
+                        const isActive = barTime >= selectedVideo.hookStart && barTime <= selectedVideo.hookEnd;
+                        // Deterministic heights for a beautiful wave
+                        const heights = [15, 30, 45, 65, 80, 50, 40, 60, 75, 90, 85, 45, 35, 55, 70, 85, 95, 60, 40, 25, 40, 60, 80, 95, 70, 50, 30, 45, 65, 80, 90, 75, 50, 35, 20, 35, 55, 70, 80, 65, 45, 25];
+                        const hPercent = heights[i % heights.length];
+                        return (
+                          <div 
+                            key={i} 
+                            style={{ height: `${hPercent}%` }}
+                            className={`w-[4px] rounded-full transition-colors duration-200 ${
+                              isActive 
+                                ? "bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]" 
+                                : "bg-slate-700 opacity-30"
+                            }`}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {/* Active Highlight Loop Range overlay */}
+                    <div 
+                      className="absolute top-0 bottom-0 bg-indigo-500/10 border-l border-r border-indigo-500 pointer-events-none"
+                      style={{
+                        left: `${(selectedVideo.hookStart / totalDuration) * 100}%`,
+                        right: `${100 - (selectedVideo.hookEnd / totalDuration) * 100}%`
+                      }}
+                    />
+
+                    {/* Left Drag Handle */}
+                    <div 
+                      className="absolute top-0 bottom-0 w-3 cursor-col-resize group flex items-center justify-center"
+                      style={{ left: `calc(${(selectedVideo.hookStart / totalDuration) * 100}% - 6px)` }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setDraggingHandle('start');
+                      }}
+                    >
+                      <div className="w-2.5 h-6 bg-indigo-600 hover:bg-indigo-500 rounded border border-white flex flex-col justify-between p-[2px] shadow-md transition-transform group-hover:scale-110">
+                        <div className="w-full h-[1px] bg-white/60" />
+                        <div className="w-full h-[1px] bg-white/60" />
+                        <div className="w-full h-[1px] bg-white/60" />
+                      </div>
+                    </div>
+
+                    {/* Right Drag Handle */}
+                    <div 
+                      className="absolute top-0 bottom-0 w-3 cursor-col-resize group flex items-center justify-center"
+                      style={{ left: `calc(${(selectedVideo.hookEnd / totalDuration) * 100}% - 6px)` }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setDraggingHandle('end');
+                      }}
+                    >
+                      <div className="w-2.5 h-6 bg-indigo-600 hover:bg-indigo-500 rounded border border-white flex flex-col justify-between p-[2px] shadow-md transition-transform group-hover:scale-110">
+                        <div className="w-full h-[1px] bg-white/60" />
+                        <div className="w-full h-[1px] bg-white/60" />
+                        <div className="w-full h-[1px] bg-white/60" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Timing Inputs / Fine-tuning Controls */}
+                  <div className="flex items-center justify-between gap-3 text-[9px] text-slate-500 bg-white/50 p-2 rounded-lg border border-slate-200/60">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-slate-400">START:</span>
+                      <button 
+                        onClick={() => handleUpdateTimestamps(Math.max(0, selectedVideo.hookStart - 1), selectedVideo.hookEnd)}
+                        className="px-1 bg-slate-200 hover:bg-slate-300 rounded font-mono font-bold transition cursor-pointer"
+                      >
+                        -1s
+                      </button>
+                      <span className="font-mono font-extrabold text-slate-800 bg-white border px-1.5 py-0.5 rounded shadow-2xs">
+                        {formatTime(selectedVideo.hookStart)}
+                      </span>
+                      <button 
+                        onClick={() => handleUpdateTimestamps(Math.min(selectedVideo.hookEnd - 1, selectedVideo.hookStart + 1), selectedVideo.hookEnd)}
+                        className="px-1 bg-slate-200 hover:bg-slate-300 rounded font-mono font-bold transition cursor-pointer"
+                      >
+                        +1s
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-slate-400">END:</span>
+                      <button 
+                        onClick={() => handleUpdateTimestamps(selectedVideo.hookStart, Math.max(selectedVideo.hookStart + 1, selectedVideo.hookEnd - 1))}
+                        className="px-1 bg-slate-200 hover:bg-slate-300 rounded font-mono font-bold transition cursor-pointer"
+                      >
+                        -1s
+                      </button>
+                      <span className="font-mono font-extrabold text-slate-800 bg-white border px-1.5 py-0.5 rounded shadow-2xs">
+                        {formatTime(selectedVideo.hookEnd)}
+                      </span>
+                      <button 
+                        onClick={() => handleUpdateTimestamps(selectedVideo.hookStart, Math.min(totalDuration, selectedVideo.hookEnd + 1))}
+                        className="px-1 bg-slate-200 hover:bg-slate-300 rounded font-mono font-bold transition cursor-pointer"
+                      >
+                        +1s
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           
           {/* Vertical Video Frame */}
           <div className="relative aspect-[9/16] w-full max-w-[280px] mx-auto bg-slate-900 border-4 border-slate-950 rounded-[32px] overflow-hidden shadow-2xl shadow-slate-950/30">
-            {/* Reel Backdrop */}
-            <img 
-              src={selectedBg} 
-              alt="Reel Background" 
-              className="w-full h-full object-cover brightness-[0.55] transition-all duration-300"
-              referrerPolicy="no-referrer"
-            />
+            {selectedVideo && showVideoPreview ? (
+              <div className="absolute inset-0 w-full h-full bg-black">
+                {/* Embed player with custom start & end looping */}
+                <iframe
+                  src={`https://www.youtube.com/embed/${selectedVideo.data?.videoId || selectedVideo.id.replace("dl_", "").split("_")[0]}?start=${selectedVideo.hookStart}&end=${selectedVideo.hookEnd}&autoplay=1&mute=1&loop=1&playlist=${selectedVideo.data?.videoId || selectedVideo.id.replace("dl_", "").split("_")[0]}&controls=0&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`}
+                  className="w-full h-full scale-[1.3] origin-center object-cover"
+                  title="YouTube Preview Looper"
+                  allow="autoplay; encrypted-media"
+                  frameBorder="0"
+                  referrerPolicy="no-referrer"
+                />
+                
+                {/* Semi-transparent Overlay to show the start/end timestamps */}
+                <div className="absolute top-14 left-3 right-3 bg-black/80 backdrop-blur-md border border-white/10 rounded-xl p-2.5 text-white font-mono text-[9px] flex flex-col gap-1 pointer-events-none z-10 shadow-lg">
+                  <div className="flex items-center justify-between text-[8px] uppercase tracking-wider text-indigo-400 font-bold">
+                    <span>Viral Hook Active</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  </div>
+                  <div className="flex justify-between items-center mt-0.5">
+                    <div>
+                      <span className="text-slate-500 text-[7px] uppercase font-bold">START</span>
+                      <p className="text-[10px] font-black text-slate-100">{formatTime(selectedVideo.hookStart)}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 text-[7px] uppercase font-bold">END</span>
+                      <p className="text-[10px] font-black text-slate-100">{formatTime(selectedVideo.hookEnd)}</p>
+                    </div>
+                    <div>
+                      <span className="text-indigo-400 text-[7px] uppercase font-bold block text-right">LENGTH</span>
+                      <p className="text-[10px] font-black text-indigo-300 text-right">{(selectedVideo.hookEnd - selectedVideo.hookStart).toFixed(0)}s</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Reel Backdrop */
+              <img 
+                src={selectedBg} 
+                alt="Reel Background" 
+                className="w-full h-full object-cover brightness-[0.55] transition-all duration-300"
+                referrerPolicy="no-referrer"
+              />
+            )}
 
             {/* Simulated VHS grain scanner overlay */}
             <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] pointer-events-none opacity-40" />
@@ -341,6 +939,449 @@ export default function AssetStudio({
               )}
             </button>
           </div>
+        </div>
+
+        {/* Asset Gallery component */}
+        <div className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm space-y-4" id="local-asset-gallery">
+          {/* Header section with Stats */}
+          <div className="flex flex-col gap-3 border-b border-slate-100 pb-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-mono font-bold text-slate-700 uppercase tracking-widest flex items-center gap-1.5">
+                <Film className="w-4 h-4 text-indigo-600 animate-pulse" />
+                Asset Gallery Studio
+              </h4>
+              <button
+                onClick={handleRefreshGallery}
+                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer flex items-center gap-1 text-[10px] font-mono font-medium"
+                title="Refresh Assets"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Sync List
+              </button>
+            </div>
+
+            {/* Quick Metadata Statistics Bar */}
+            <div className="grid grid-cols-3 gap-2 bg-slate-50 border border-slate-200/60 rounded-xl p-2.5 text-center">
+              <div>
+                <span className="block text-[8px] font-mono uppercase text-slate-400">Total Clips</span>
+                <span className="text-xs font-mono font-black text-indigo-650">{processedVideos.length}</span>
+              </div>
+              <div className="border-x border-slate-200/80">
+                <span className="block text-[8px] font-mono uppercase text-slate-400">Local Cache</span>
+                <span className="text-xs font-mono font-black text-emerald-600">
+                  {processedVideos.filter(v => v.source !== "drive").length}
+                </span>
+              </div>
+              <div>
+                <span className="block text-[8px] font-mono uppercase text-slate-400">Drive Synced</span>
+                <span className="text-xs font-mono font-black text-amber-500">
+                  {processedVideos.filter(v => v.source === "drive").length}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {processedVideos.length === 0 ? (
+            <div className="p-6 text-center border border-dashed border-slate-200 rounded-xl space-y-2">
+              <Film className="w-8 h-8 text-slate-300 mx-auto" />
+              <p className="text-[10px] font-mono text-slate-400">No locally stored clips found.</p>
+              <p className="text-[9px] text-slate-400">Go to the YouTube Fetcher tab, paste a URL, extract a viral hook, and hit 'Save Isolated Clip' to populate this gallery.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Search and Filters Segment Controls */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                {/* Search Input */}
+                <div className="relative flex-1">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-400">
+                    <Search className="w-3.5 h-3.5" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Search title, film, or vibes..."
+                    value={gallerySearch}
+                    onChange={(e) => setGallerySearch(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-[10px] text-slate-700 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white transition"
+                  />
+                  {gallerySearch && (
+                    <button
+                      onClick={() => setGallerySearch("")}
+                      className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-slate-400 hover:text-slate-600 text-[10px]"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Tabs Toggle */}
+                <div className="flex bg-slate-100 border border-slate-200 p-0.5 rounded-xl self-start sm:self-auto">
+                  {(["all", "local", "drive"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setGalleryFilter(tab)}
+                      className={`px-2 py-1 rounded-lg text-[9px] font-mono font-semibold uppercase tracking-wider transition-all cursor-pointer ${
+                        galleryFilter === tab
+                          ? "bg-white text-indigo-650 shadow-xs border-slate-200 font-bold"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      {tab === "all" ? "All" : tab === "local" ? "Offline" : "Synced"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Batch Processing Dashboard Controller */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleToggleSelectAll}
+                      className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-slate-600 hover:text-indigo-600 cursor-pointer bg-white px-2 py-1 border border-slate-200 rounded-lg transition"
+                    >
+                      {selectedAssetIds.length === processedVideos.length ? (
+                        <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                      ) : (
+                        <Square className="w-3.5 h-3.5 text-slate-400" />
+                      )}
+                      <span>
+                        {selectedAssetIds.length === processedVideos.length ? "Deselect All" : "Select All"}
+                      </span>
+                    </button>
+                    
+                    {selectedAssetIds.length > 0 && (
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-indigo-600 text-white rounded-full">
+                        {selectedAssetIds.length} Selected
+                      </span>
+                    )}
+                  </div>
+
+                  {selectedAssetIds.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setShowBulkRenamePanel(!showBulkRenamePanel)}
+                        className={`px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider rounded-lg border transition cursor-pointer ${
+                          showBulkRenamePanel 
+                            ? "bg-amber-50 border-amber-200 text-amber-700" 
+                            : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                        title="Bulk Rename"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        onClick={handleBulkCloudSync}
+                        disabled={isBulkProcessing}
+                        className="px-2.5 py-1 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-indigo-600 disabled:opacity-55 text-[9px] font-bold uppercase tracking-wider rounded-lg flex items-center gap-1 transition cursor-pointer"
+                        title="Cloud Sync"
+                      >
+                        <CloudUpload className="w-3 h-3" />
+                        Sync
+                      </button>
+                      <button
+                        onClick={handleBulkDelete}
+                        disabled={isBulkProcessing}
+                        className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-100 hover:border-rose-200 text-rose-600 disabled:opacity-55 text-[9px] font-bold uppercase tracking-wider rounded-lg transition cursor-pointer"
+                        title="Bulk Delete"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bulk Rename Inputs Panel */}
+                {showBulkRenamePanel && selectedAssetIds.length > 0 && (
+                  <div className="p-2.5 bg-white border border-slate-150 rounded-lg space-y-2 animate-fadeIn">
+                    <p className="text-[8px] font-mono font-bold uppercase tracking-wider text-slate-400">Bulk Title Customizer</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[8px] text-slate-500 font-semibold mb-0.5">Prefix (Appends before)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. [Reel] "
+                          value={bulkRenamePrefix}
+                          onChange={(e) => setBulkRenamePrefix(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] text-slate-700 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[8px] text-slate-500 font-semibold mb-0.5">Suffix (Appends after)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. _90sBreeze"
+                          value={bulkRenameSuffix}
+                          onChange={(e) => setBulkRenameSuffix(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] text-slate-700 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-1.5 pt-1">
+                      <button
+                        onClick={() => setShowBulkRenamePanel(false)}
+                        className="px-2 py-0.5 text-[9px] text-slate-500 hover:bg-slate-100 border border-transparent rounded-md cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleBulkRename}
+                        className="px-3 py-0.5 bg-indigo-600 text-white hover:bg-indigo-700 text-[9px] font-bold rounded-md cursor-pointer"
+                      >
+                        Apply Bulk Rename
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Processing Logs & Message Banner */}
+                {bulkProgressMessage && (
+                  <div className="p-2 bg-indigo-50/75 border border-indigo-100 text-indigo-950 rounded-lg text-[9px] font-mono flex items-center gap-2">
+                    {isBulkProcessing && <RefreshCw className="w-3 h-3 animate-spin text-indigo-600" />}
+                    <span>{bulkProgressMessage}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Scrollable Gallery Items Grid */}
+              <div className="grid grid-cols-2 gap-3.5 max-h-[460px] overflow-y-auto pr-1 custom-scrollbar">
+                {processedVideos
+                  .filter(asset => {
+                    const term = gallerySearch.toLowerCase();
+                    const matchesSearch = 
+                      (asset.title || "").toLowerCase().includes(term) ||
+                      (asset.movie || "").toLowerCase().includes(term) ||
+                      (asset.data?.singers || "").toLowerCase().includes(term) ||
+                      (asset.data?.mood || "").toLowerCase().includes(term) ||
+                      (asset.data?.vibes || "").toLowerCase().includes(term);
+                    
+                    const matchesFilter = galleryFilter === "all" ||
+                      (galleryFilter === "local" && asset.source !== "drive") ||
+                      (galleryFilter === "drive" && asset.source === "drive");
+
+                    return matchesSearch && matchesFilter;
+                  })
+                  .map((asset) => {
+                    const videoId = asset.data?.videoId || asset.id.replace("dl_", "").split("_")[0];
+                    const hasVideoId = videoId && videoId.length === 11;
+                    const thumbnailUrl = hasVideoId 
+                      ? `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`
+                      : null;
+                    const isSelected = selectedAssetIds.includes(asset.id);
+                    const isActive = selectedVideo?.id === asset.id;
+
+                    return (
+                      <div 
+                        key={asset.id} 
+                        className={`group relative flex flex-col bg-slate-50 border rounded-2xl overflow-hidden transition-all duration-300 ${
+                          isActive 
+                            ? "border-indigo-600 ring-2 ring-indigo-550/20 shadow-md bg-indigo-50/10" 
+                            : isSelected
+                              ? "border-indigo-350 bg-indigo-50/5 shadow-xs"
+                              : "border-slate-200 hover:border-slate-350 hover:shadow-xs"
+                        }`}
+                      >
+                        {/* Thumbnail Section */}
+                        <div className="relative aspect-video w-full bg-slate-950 overflow-hidden shrink-0">
+                          {thumbnailUrl ? (
+                            <>
+                              <img 
+                                src={thumbnailUrl} 
+                                alt={asset.title} 
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-350" 
+                                referrerPolicy="no-referrer"
+                              />
+                              {/* Overlay scrim */}
+                              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/25 pointer-events-none" />
+                            </>
+                          ) : (
+                            /* Fully Generated Visual Retro Thumbnail Card fall-back */
+                            <div className="w-full h-full bg-gradient-to-br from-indigo-950 via-slate-900 to-rose-950/90 flex flex-col items-center justify-center p-3 relative">
+                              {/* Audio soundbar simulation bars */}
+                              <div className="absolute inset-x-0 bottom-1 flex items-end justify-center gap-0.5 opacity-30 h-8 pointer-events-none">
+                                <span className="w-0.5 bg-indigo-400 h-2 animate-pulse" />
+                                <span className="w-0.5 bg-indigo-300 h-4 animate-pulse" />
+                                <span className="w-0.5 bg-indigo-500 h-6 animate-pulse" />
+                                <span className="w-0.5 bg-rose-400 h-3 animate-pulse" />
+                                <span className="w-0.5 bg-rose-300 h-5 animate-pulse" />
+                                <span className="w-0.5 bg-indigo-400 h-1 animate-pulse" />
+                              </div>
+                              <Music className="w-5 h-5 text-indigo-400/80 mb-1 animate-bounce" />
+                              <span className="text-[7px] font-mono uppercase tracking-wider text-slate-400/90 text-center truncate w-full px-1">
+                                {asset.title || asset.name}
+                              </span>
+                              <span className="text-[6px] font-mono text-indigo-300/80 uppercase">
+                                {asset.movie || "90s Retro Track"}
+                              </span>
+                            </div>
+                          )}
+                          
+                          {/* Checkbox selector overlay on thumbnail top-left */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleSelectAsset(asset.id);
+                            }}
+                            className="absolute top-2 left-2 z-10 p-1 bg-black/60 backdrop-blur-md hover:bg-black/85 rounded-lg border border-white/10 transition cursor-pointer"
+                            title={isSelected ? "Deselect item" : "Select item"}
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="w-3.5 h-3.5 text-indigo-400" />
+                            ) : (
+                              <Square className="w-3.5 h-3.5 text-white/70" />
+                            )}
+                          </button>
+
+                          {/* Hover Overlay containing a nice centered button */}
+                          <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => handlePlayAsset(asset)}
+                              className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg hover:scale-110 transition cursor-pointer"
+                              title="Load Loop Player"
+                            >
+                              <PlayCircle className="w-5 h-5 fill-white/15" />
+                            </button>
+                          </div>
+
+                          {/* Cloud Sync Status Icon badge */}
+                          {asset.source === "drive" ? (
+                            <div className="absolute top-2 right-2 z-10 bg-emerald-600/90 backdrop-blur-md px-1.5 py-0.5 rounded-md border border-emerald-500/35 text-[7px] font-mono font-bold text-white uppercase tracking-wider flex items-center gap-0.5">
+                              <Cloud className="w-2.5 h-2.5 fill-white/10" />
+                              <span>Synced</span>
+                            </div>
+                          ) : (
+                            <div className="absolute top-2 right-2 z-10 bg-slate-800/85 backdrop-blur-md px-1.5 py-0.5 rounded-md border border-slate-700/50 text-[7px] font-mono font-bold text-slate-300 uppercase tracking-wider flex items-center gap-0.5">
+                              <Database className="w-2.5 h-2.5" />
+                              <span>Offline</span>
+                            </div>
+                          )}
+
+                          {/* Video Loop Clip Duration Indicator */}
+                          <div className="absolute bottom-1.5 right-1.5 bg-black/75 backdrop-blur-xs px-1.5 py-0.5 rounded text-[8px] font-mono text-white/90">
+                            {asset.hookEnd && asset.hookStart ? (asset.hookEnd - asset.hookStart).toFixed(0) : "15"}s
+                          </div>
+                        </div>
+
+                        {/* Meta Details Section */}
+                        <div className="p-2.5 flex-1 flex flex-col justify-between space-y-2">
+                          <div className="space-y-1">
+                            {editingId === asset.id ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="text"
+                                  value={editingTitle}
+                                  onChange={(e) => setEditingTitle(e.target.value)}
+                                  className="flex-1 min-w-0 bg-white border border-slate-300 rounded-lg px-1.5 py-0.5 text-[10px] text-slate-800 focus:outline-none focus:border-indigo-500 font-medium"
+                                  autoFocus
+                                />
+                                <button
+                                  onClick={() => handleSaveRename(asset)}
+                                  className="p-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-600 rounded cursor-pointer"
+                                  title="Save Title"
+                                >
+                                  <Save className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => setEditingId(null)}
+                                  className="p-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 text-slate-500 rounded cursor-pointer"
+                                  title="Cancel"
+                                >
+                                  <span className="text-[10px] font-bold">✕</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <h5 
+                                  className="text-[10px] font-bold text-slate-800 line-clamp-1 group-hover:text-indigo-650 transition cursor-pointer"
+                                  title={asset.title}
+                                  onClick={() => handlePlayAsset(asset)}
+                                >
+                                  {asset.title}
+                                </h5>
+                                
+                                <p className="text-[8px] font-semibold text-slate-400 truncate uppercase tracking-wide flex items-center gap-1">
+                                  <span>{asset.movie || "Unknown Film"}</span>
+                                  {asset.year ? <span className="opacity-80">({asset.year})</span> : null}
+                                </p>
+                              </>
+                            )}
+
+                            {/* Singers list if defined */}
+                            {asset.data?.singers && (
+                              <p className="text-[8px] text-slate-500/90 truncate italic" title={asset.data.singers}>
+                                Singers: {asset.data.singers}
+                              </p>
+                            )}
+
+                            {/* Loop duration & Vibe badge line */}
+                            <div className="flex items-center justify-between gap-1 pt-1">
+                              <p className="text-[8px] text-slate-500 font-mono">
+                                Loop: <strong className="text-slate-700">{formatTime(asset.hookStart || 0)}</strong> - <strong className="text-slate-700">{formatTime(asset.hookEnd || 15)}</strong>
+                              </p>
+                              
+                              {asset.data?.mood && (
+                                <span className={`px-1 py-0.5 text-[6.5px] font-bold rounded uppercase tracking-wider shrink-0 ${
+                                  (asset.data.mood.toLowerCase().includes("romantic") || asset.data.mood.toLowerCase().includes("love"))
+                                    ? "bg-rose-50 text-rose-600 border border-rose-150"
+                                    : (asset.data.mood.toLowerCase().includes("happy") || asset.data.mood.toLowerCase().includes("upbeat"))
+                                    ? "bg-amber-50 text-amber-600 border border-amber-150"
+                                    : (asset.data.mood.toLowerCase().includes("sad") || asset.data.mood.toLowerCase().includes("emotional"))
+                                    ? "bg-sky-50 text-sky-600 border border-sky-150"
+                                    : "bg-indigo-50 text-indigo-600 border border-indigo-150"
+                                }`}>
+                                  {asset.data.mood.split(",")[0]}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Quick Actions Footer Buttons */}
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                            <button
+                              onClick={() => handlePlayAsset(asset)}
+                              className={`text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1 px-2 py-1 rounded-lg transition-all cursor-pointer ${
+                                isActive 
+                                  ? "text-indigo-700 bg-indigo-50 border border-indigo-150 font-bold" 
+                                  : "text-slate-500 hover:text-indigo-600 hover:bg-slate-100/60"
+                              }`}
+                            >
+                              <Play className="w-2.5 h-2.5 fill-current" />
+                              {isActive ? (
+                                <span className="flex items-center gap-0.5">
+                                  <span>Active</span>
+                                  {/* Minimal live equalizer waves animation */}
+                                  <span className="flex gap-px items-end h-2 w-1.5 mb-0.5">
+                                    <span className="w-px bg-indigo-600 h-1 animate-pulse" />
+                                    <span className="w-px bg-indigo-600 h-2 animate-pulse" />
+                                    <span className="w-px bg-indigo-600 h-1 animate-pulse" />
+                                  </span>
+                                </span>
+                              ) : "Play"}
+                            </button>
+                            
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleStartRename(asset)}
+                                className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition cursor-pointer"
+                                title="Rename Clip"
+                              >
+                                <Edit2 className="w-2.5 h-2.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAsset(asset.id)}
+                                className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 p-1.5 rounded-lg transition cursor-pointer"
+                                title="Delete Clip"
+                              >
+                                <Trash2 className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

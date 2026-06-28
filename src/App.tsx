@@ -28,6 +28,7 @@ import { TrendItem, QueueItem } from "./types";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, signInWithGoogle, logout, db } from "./lib/firebase";
 import { collection, query, where, getDocs, setDoc, deleteDoc, doc } from "firebase/firestore";
+import { ToastProvider } from "./components/ToastContext";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>("architecture");
@@ -175,9 +176,10 @@ export default function App() {
   ];
 
   return (
-    <div className={`flex h-screen w-full font-sans antialiased selection:bg-indigo-500/10 selection:text-indigo-950 overflow-hidden ${
-      isDark ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"
-    }`}>
+    <ToastProvider>
+      <div className={`flex h-screen w-full font-sans antialiased selection:bg-indigo-500/10 selection:text-indigo-950 overflow-hidden ${
+        isDark ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"
+      }`}>
       
       {/* SIDEBAR - Dark Premium */}
       <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800 shrink-0 select-none">
@@ -431,5 +433,6 @@ export default function App() {
       </main>
 
     </div>
+    </ToastProvider>
   );
 }

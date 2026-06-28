@@ -18,11 +18,18 @@ import {
   Loader2, 
   Trash2, 
   RefreshCw,
-  Calendar
+  Calendar,
+  Search
 } from "lucide-react";
 import { User } from "firebase/auth";
 import { getAccessToken, signInWithGoogle } from "../lib/firebase";
-import { QueueItem } from "../types";
+import { QueueItem, AnalyzedAsset, StoredAsset } from "../types";
+import { useToast } from "./ToastContext";
+import { 
+  getAssetsFromOfflineDB, 
+  saveAssetToOfflineDB, 
+  deleteAssetFromOfflineDB 
+} from "../lib/indexedDb";
 
 interface YoutubeFetcherProps {
   user: User | null;
@@ -32,36 +39,8 @@ interface YoutubeFetcherProps {
   setStorageType: (type: "local" | "drive") => void;
 }
 
-interface AnalyzedAsset {
-  videoId: string;
-  title: string;
-  movie: string;
-  year: number;
-  singers: string;
-  hookStart: number; // in seconds
-  hookEnd: number; // in seconds
-  mood: string;
-  vibes: string;
-  lyricsSnippet: string;
-  translatedLyrics: string;
-  caption: string;
-}
-
-interface StoredAsset {
-  id: string;
-  name: string;
-  source: "local" | "drive";
-  driveFileId?: string;
-  title: string;
-  movie: string;
-  year: number;
-  hookStart: number;
-  hookEnd: number;
-  savedAt: string;
-  data: AnalyzedAsset;
-}
-
 export default function YoutubeFetcher({ user, onAddToQueue, onGoogleSignIn, storageType, setStorageType }: YoutubeFetcherProps) {
+  const toast = useToast();
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [isFetching, setIsFetching] = useState(false);
   const [fetchStep, setFetchStep] = useState(0);
@@ -79,8 +58,10 @@ export default function YoutubeFetcher({ user, onAddToQueue, onGoogleSignIn, sto
   const [driveFolderId, setDriveFolderId] = useState<string | null>(null);
   const [driveFiles, setDriveFiles] = useState<{ id: string; name: string; createdTime: string }[]>([]);
   const [localAssets, setLocalAssets] = useState<StoredAsset[]>([]);
+  const [localSearchQuery, setLocalSearchQuery] = useState("");
   const [loadingDriveFiles, setLoadingDriveFiles] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [downloadSuccess, setDownloadSuccess] = useState(false);
 
   // Video loop states
   const [isPlayerReady, setIsPlayerReady] = useState(false);
@@ -264,14 +245,35 @@ export default function YoutubeFetcher({ user, onAddToQueue, onGoogleSignIn, sto
     }
   };
 
-  const loadLocalAssets = () => {
+  const loadLocalAssets = async () => {
     try {
-      const data = localStorage.getItem("the90s_Breeze_local_assets");
-      if (data) {
-        setLocalAssets(JSON.parse(data));
+      // 1. Try fetching from IndexedDB
+      const offlineAssets = await getAssetsFromOfflineDB();
+      if (offlineAssets && offlineAssets.length > 0) {
+        setLocalAssets(offlineAssets);
+      } else {
+        // 2. Fallback to localStorage
+        const data = localStorage.getItem("the90s_Breeze_local_assets");
+        if (data) {
+          const parsed = JSON.parse(data);
+          setLocalAssets(parsed);
+          // Migrate localStorage content into IndexedDB
+          for (const asset of parsed) {
+            await saveAssetToOfflineDB(asset);
+          }
+        }
       }
     } catch (e) {
-      console.error("Error loading local assets: ", e);
+      console.error("Error loading local assets from IndexedDB: ", e);
+      // Failover to local storage completely
+      try {
+        const data = localStorage.getItem("the90s_Breeze_local_assets");
+        if (data) {
+          setLocalAssets(JSON.parse(data));
+        }
+      } catch (innerErr) {
+        console.error("Complete storage failure:", innerErr);
+      }
     }
   };
 
@@ -310,9 +312,12 @@ export default function YoutubeFetcher({ user, onAddToQueue, onGoogleSignIn, sto
       const result: AnalyzedAsset = await response.json();
       clearInterval(interval);
       setAnalyzedData(result);
+      toast.success(`Successfully analyzed YouTube video & extracted viral hook details!`);
     } catch (err: any) {
       clearInterval(interval);
-      setErrorMsg(err.message || "An unexpected error occurred during pipeline analysis.");
+      const errMsg = err.message || "An unexpected error occurred during pipeline analysis.";
+      setErrorMsg(errMsg);
+      toast.error(`Failed to analyze YouTube video: ${errMsg}`);
     } finally {
       setIsFetching(false);
     }
@@ -447,6 +452,7 @@ export default function YoutubeFetcher({ user, onAddToQueue, onGoogleSignIn, sto
       const updated = [newLocalAsset, ...localAssets];
       setLocalAssets(updated);
       localStorage.setItem("the90s_Breeze_local_assets", JSON.stringify(updated));
+      await saveAssetToOfflineDB(newLocalAsset);
 
       // Trigger high-quality interactive offline bundle download for their laptop
       const cleanTitle = analyzedData.title.replace(/[^a-zA-Z0-9]/g, "_");
@@ -797,11 +803,12 @@ ${analyzedData.translatedLyrics}
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+      toast.success("Successfully saved clip to local database & downloaded loop package!");
     } else {
       // Save to Google Drive
       const token = await getAccessToken();
       if (!token) {
-        alert("You must be logged in with Google to save to Drive!");
+        toast.error("Authentication required: Please sign in with Google to sync to Drive.");
         return;
       }
 
@@ -856,15 +863,80 @@ ${analyzedData.translatedLyrics}
 
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 3000);
+        toast.success("Successfully uploaded & synced viral hook to Google Drive!");
         await syncGoogleDrive(); // refresh drive list
       } catch (err: any) {
         console.error("Error saving to Drive: ", err);
-        alert(`Failed to save to Google Drive: ${err.message}`);
+        toast.error(`Failed to save to Google Drive: ${err.message}`);
       }
     }
   };
 
-  const handleDeleteLocalAsset = (id: string, e: React.MouseEvent) => {
+  const handleDownloadLocalHook = async () => {
+    if (!analyzedData) return;
+    
+    const downloadData = {
+      videoId: analyzedData.videoId,
+      title: analyzedData.title,
+      movie: analyzedData.movie,
+      year: analyzedData.year,
+      singers: analyzedData.singers,
+      hookStart: loopStart,
+      hookEnd: loopEnd,
+      mood: analyzedData.mood,
+      vibes: analyzedData.vibes,
+      lyricsSnippet: analyzedData.lyricsSnippet,
+      translatedLyrics: analyzedData.translatedLyrics,
+      caption: analyzedData.caption,
+      downloadCommand: `yt-dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]" --external-downloader ffmpeg --external-downloader-args "ffmpeg_i:-ss ${loopStart} -to ${loopEnd}" "https://www.youtube.com/watch?v=${analyzedData.videoId}" -o "${analyzedData.title.replace(/[^a-zA-Z0-9]/g, "_")}_viral_hook.mp4"`,
+      downloadedAt: new Date().toISOString()
+    };
+
+    const cleanTitle = analyzedData.title.replace(/[^a-zA-Z0-9]/g, "_");
+    const jsonString = JSON.stringify(downloadData, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${cleanTitle}_viral_hook_details.json`;
+    link.click();
+    
+    URL.revokeObjectURL(url);
+    setDownloadSuccess(true);
+    setTimeout(() => setDownloadSuccess(false), 3000);
+    toast.success("Successfully exported clip JSON package to local files!");
+
+    // Register this downloaded clip directly in the IndexedDB database so it's searchable and previewable offline
+    try {
+      const assetId = `dl_${analyzedData.videoId}_${Date.now()}`;
+      const newLocalAsset: StoredAsset = {
+        id: assetId,
+        name: `${analyzedData.title} (Downloaded Clip)`,
+        source: "local",
+        title: analyzedData.title,
+        movie: analyzedData.movie,
+        year: analyzedData.year,
+        hookStart: loopStart,
+        hookEnd: loopEnd,
+        savedAt: new Date().toLocaleDateString() + " (DL)",
+        data: {
+          ...analyzedData,
+          hookStart: loopStart,
+          hookEnd: loopEnd
+        }
+      };
+
+      const updated = [newLocalAsset, ...localAssets];
+      setLocalAssets(updated);
+      localStorage.setItem("the90s_Breeze_local_assets", JSON.stringify(updated));
+      await saveAssetToOfflineDB(newLocalAsset);
+    } catch (e) {
+      console.error("Failed to index downloaded clip in IndexedDB:", e);
+    }
+  };
+
+  const handleDeleteLocalAsset = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const confirmed = window.confirm("Are you sure you want to delete this locally saved asset?");
     if (!confirmed) return;
@@ -872,6 +944,8 @@ ${analyzedData.translatedLyrics}
     const updated = localAssets.filter(item => item.id !== id);
     setLocalAssets(updated);
     localStorage.setItem("the90s_Breeze_local_assets", JSON.stringify(updated));
+    await deleteAssetFromOfflineDB(id);
+    toast.success("Successfully deleted local asset from offline database.");
   };
 
   const handleDeleteDriveAsset = async (fileId: string, fileName: string, e: React.MouseEvent) => {
@@ -880,7 +954,10 @@ ${analyzedData.translatedLyrics}
     if (!confirmed) return;
 
     const token = await getAccessToken();
-    if (!token) return;
+    if (!token) {
+      toast.error("Authentication required: Please sign in with Google to delete from Drive.");
+      return;
+    }
 
     try {
       const deleteRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
@@ -892,20 +969,25 @@ ${analyzedData.translatedLyrics}
         throw new Error("Failed to delete the file from Google Drive.");
       }
 
+      toast.success(`Successfully deleted '${fileName}' from Google Drive.`);
       await syncGoogleDrive();
     } catch (err: any) {
-      alert(`Failed to delete asset: ${err.message}`);
+      toast.error(`Failed to delete asset from Google Drive: ${err.message}`);
     }
   };
 
   const handleLoadAsset = (asset: StoredAsset) => {
     setAnalyzedData(asset.data);
     setYoutubeUrl(`https://www.youtube.com/watch?v=${asset.data.videoId}`);
+    toast.info(`Loaded local asset: ${asset.title}`);
   };
 
   const handleLoadDriveAsset = async (fileId: string) => {
     const token = await getAccessToken();
-    if (!token) return;
+    if (!token) {
+      toast.error("Authentication required: Please sign in with Google to load from Drive.");
+      return;
+    }
 
     try {
       const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
@@ -916,8 +998,9 @@ ${analyzedData.translatedLyrics}
       const data: AnalyzedAsset = await res.json();
       setAnalyzedData(data);
       setYoutubeUrl(`https://www.youtube.com/watch?v=${data.videoId}`);
+      toast.success(`Successfully loaded asset from Google Drive: ${data.title}`);
     } catch (err: any) {
-      alert(`Error loading file content: ${err.message}`);
+      toast.error(`Error loading file content from Google Drive: ${err.message}`);
     }
   };
 
@@ -936,6 +1019,7 @@ ${analyzedData.translatedLyrics}
       status: "scheduled",
       platforms: ["instagram", "youtube"]
     });
+    toast.success("Successfully queued clip to content schedule!");
   };
 
   const formatTime = (seconds: number) => {
@@ -954,6 +1038,20 @@ ${analyzedData.translatedLyrics}
       setTimeout(() => setCopiedLyrics(false), 2000);
     }
   };
+
+  const filteredLocalAssets = localAssets.filter((asset) => {
+    if (!localSearchQuery.trim()) return true;
+    const query = localSearchQuery.toLowerCase();
+    return (
+      asset.title?.toLowerCase().includes(query) ||
+      asset.movie?.toLowerCase().includes(query) ||
+      asset.year?.toString().includes(query) ||
+      asset.name?.toLowerCase().includes(query) ||
+      asset.data?.singers?.toLowerCase().includes(query) ||
+      asset.data?.mood?.toLowerCase().includes(query) ||
+      asset.data?.vibes?.toLowerCase().includes(query)
+    );
+  });
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-6" id="youtube-fetcher-panel">
@@ -1029,9 +1127,33 @@ ${analyzedData.translatedLyrics}
                 </div>
               </form>
 
+              {isSearching && (
+                <div className="p-4 bg-slate-950/60 rounded-xl border border-red-900/20 flex flex-col items-center justify-center gap-2 text-center animate-pulse">
+                  <Loader2 className="w-6 h-6 text-red-500 animate-spin" />
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Searching YouTube</p>
+                    <p className="text-[9px] text-slate-500">Querying YouTube search indexes...</p>
+                  </div>
+                </div>
+              )}
+
               {searchError && (
-                <div className="p-2.5 bg-rose-950/20 rounded-xl border border-rose-500/20 text-rose-300 text-[10px] font-medium leading-relaxed">
-                  {searchError}
+                <div className="p-3 bg-rose-950/30 rounded-xl border border-rose-500/20 text-rose-300 text-[10px] flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold uppercase tracking-wider text-[9px] text-rose-400">Search Failed</p>
+                    <p className="mt-0.5 text-slate-300">{searchError}</p>
+                  </div>
+                </div>
+              )}
+
+              {!isSearching && !searchError && searchResults.length > 0 && (
+                <div className="p-3 bg-emerald-950/20 rounded-xl border border-emerald-500/20 text-emerald-400 text-[10px] flex items-center gap-2">
+                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                  <div>
+                    <p className="font-bold uppercase tracking-wider text-[9px] text-emerald-400">Search Succeeded</p>
+                    <p className="text-[9px] text-slate-400">Found {searchResults.length} matching YouTube results!</p>
+                  </div>
                 </div>
               )}
 
@@ -1215,9 +1337,16 @@ ${analyzedData.translatedLyrics}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Folder className="w-4 h-4 text-indigo-400" />
-              <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                Saved Hooks Library
-              </h4>
+              <div className="flex items-center gap-1.5">
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                  Saved Hooks Library
+                </h4>
+                {storageType === "local" && (
+                  <span className="px-1.5 py-0.5 text-[8px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded font-mono uppercase">
+                    IndexedDB Index
+                  </span>
+                )}
+              </div>
             </div>
             {storageType === "drive" && user && (
               <button
@@ -1231,6 +1360,28 @@ ${analyzedData.translatedLyrics}
             )}
           </div>
 
+          {/* Local Search Input */}
+          {storageType === "local" && localAssets.length > 0 && (
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search local database index offline..."
+                value={localSearchQuery}
+                onChange={(e) => setLocalSearchQuery(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 rounded-xl pl-8 pr-12 py-1.5 text-[10px] text-slate-200 placeholder:text-slate-500 outline-none transition"
+              />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+              {localSearchQuery && (
+                <button
+                  onClick={() => setLocalSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-[8px] font-bold uppercase tracking-wider"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Saved elements files representation */}
           <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
             {storageType === "local" ? (
@@ -1238,17 +1389,28 @@ ${analyzedData.translatedLyrics}
                 <div className="text-center py-6 text-[10px] text-slate-500 italic">
                   No offline assets created yet.
                 </div>
+              ) : filteredLocalAssets.length === 0 ? (
+                <div className="text-center py-6 text-[10px] text-slate-500 italic">
+                  No matching local assets found.
+                </div>
               ) : (
-                localAssets.map((asset) => (
+                filteredLocalAssets.map((asset) => (
                   <div
                     key={asset.id}
                     onClick={() => handleLoadAsset(asset)}
                     className="group flex items-center justify-between p-2.5 bg-slate-950 hover:bg-slate-800/80 rounded-xl border border-slate-800/60 cursor-pointer transition"
                   >
                     <div className="flex-1 min-w-0 pr-3">
-                      <p className="text-[10px] font-bold text-slate-200 truncate group-hover:text-white">
-                        {asset.title}
-                      </p>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <p className="text-[10px] font-bold text-slate-200 truncate group-hover:text-white">
+                          {asset.title}
+                        </p>
+                        {asset.id.startsWith("dl_") && (
+                          <span className="shrink-0 px-1 py-0.2 text-[7px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/10 rounded uppercase font-mono tracking-wider">
+                            Local Clip
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[8px] font-mono text-slate-500 mt-0.5 uppercase tracking-wider">
                         {asset.movie} ({asset.year}) • {formatTime(asset.hookStart)}-{formatTime(asset.hookEnd)}
                       </p>
@@ -1502,6 +1664,22 @@ ${analyzedData.translatedLyrics}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={handleDownloadLocalHook}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500/20 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition shadow-md"
+                  >
+                    {downloadSuccess ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-200" />
+                        Downloaded
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5 text-emerald-100" />
+                        Save to Local
+                      </>
+                    )}
+                  </button>
                   <button
                     onClick={handleSaveAsset}
                     className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition shadow-sm"

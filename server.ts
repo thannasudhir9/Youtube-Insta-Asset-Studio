@@ -401,14 +401,13 @@ app.post("/api/youtube/analyze", async (req, res) => {
   }
 });
 
-// 3c. YouTube Search with Search Grounding
+// 3c. YouTube Search with Search Grounding / Official YouTube API v3
 app.post("/api/youtube/search", async (req, res) => {
   const { query } = req.body;
   if (!query || !query.trim()) {
     return res.json([]);
   }
 
-  const ai = getGeminiClient(req);
   const lowerQuery = query.toLowerCase();
 
   // Curated highly realistic fallback results if Gemini or networking is offline
@@ -422,6 +421,40 @@ app.post("/api/youtube/search", async (req, res) => {
     { videoId: "zX_r8eWz6vE", title: "Thumbayum Thumbapuvum - Meenathil Thalikettu Classic", channelTitle: "Malayalam Nostalgia Hits", snippet: "Warm acoustic backing, standard Kerala scenic backwaters feeling." }
   ];
 
+  // 1. Try Official YouTube Data API v3 if key is configured
+  const ytKey = req.headers["x-youtube-key"] || process.env.YOUTUBE_API_KEY;
+  if (ytKey) {
+    try {
+      console.log("[*] Performing official YouTube v3 Search API lookup.");
+      const ytResponse = await fetch(
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=6&q=${encodeURIComponent(query)}&type=video&key=${ytKey}`
+      );
+      if (ytResponse.ok) {
+        const data = await ytResponse.json();
+        if (data.items && Array.isArray(data.items)) {
+          const results = data.items
+            .filter((item: any) => item.id && item.id.videoId)
+            .map((item: any) => ({
+              videoId: item.id.videoId,
+              title: item.snippet.title,
+              snippet: item.snippet.description || item.snippet.title,
+              channelTitle: item.snippet.channelTitle || "YouTube Content Creator"
+            }));
+          if (results.length > 0) {
+            return res.json(results);
+          }
+        }
+      } else {
+        const errDetails = await ytResponse.text();
+        console.warn("YouTube Search API failed, status code:", ytResponse.status, errDetails);
+      }
+    } catch (apiErr) {
+      console.error("YouTube v3 Search API Fetch Error:", apiErr);
+    }
+  }
+
+  // 2. Fallback to Gemini 2-step Search Grounding
+  const ai = getGeminiClient(req);
   if (!ai) {
     // Filter fallbacks based on keywords for offline robust search feel
     const filtered = fallbacks.filter(
@@ -432,17 +465,37 @@ app.post("/api/youtube/search", async (req, res) => {
   }
 
   try {
-    const searchPrompt = `The user is searching for a YouTube video with this query: "${query}".
-    Search Google to find up to 6 actual YouTube video results matching this query.
-    Extract the Title, the 11-character YouTube video ID (from watch?v=XXXXXXXXXXX or youtu.be/XXXXXXXXXXX), a brief descriptive snippet, and the Channel Title.
-    Ensure that the videoId is strictly the 11-character string, and is a valid YouTube video.
-    Return a strictly valid JSON array of objects conforming to the array schema.`;
+    const researchPrompt = `Find up to 6 real YouTube video results for the search query: "${query}".
+    Search Google to identify the actual, valid YouTube videos matching this query.
+    For each video found, extract:
+    1. Title
+    2. The 11-character YouTube video ID (from watch?v=XXXXXXXXXXX or youtu.be/XXXXXXXXXXX)
+    3. Channel Title
+    4. A brief snippet describing the video.`;
+
+    const researchResponse = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: researchPrompt,
+      config: {
+        tools: [{ googleSearch: {} }]
+      }
+    });
+
+    const researchText = researchResponse.text || "No results found.";
+
+    const parsePrompt = `You are a YouTube search result parser. Format the following research findings into a strictly valid JSON array of objects conforming to the requested schema.
+    
+    Research Findings:
+    """
+    ${researchText}
+    """
+
+    Ensure that every object in the JSON array has "videoId" (strictly 11 characters), "title", "snippet", and "channelTitle". Do not return any general text outside of the JSON block.`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
-      contents: searchPrompt,
+      contents: parsePrompt,
       config: {
-        tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,

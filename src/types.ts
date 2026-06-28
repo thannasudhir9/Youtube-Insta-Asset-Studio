@@ -37,3 +37,32 @@ export interface PerformanceOverTime {
   views: number;
   engagement: number;
 }
+
+export interface AnalyzedAsset {
+  videoId: string;
+  title: string;
+  movie: string;
+  year: number;
+  singers: string;
+  hookStart: number; // in seconds
+  hookEnd: number; // in seconds
+  mood: string;
+  vibes: string;
+  lyricsSnippet: string;
+  translatedLyrics: string;
+  caption: string;
+}
+
+export interface StoredAsset {
+  id: string;
+  name: string;
+  source: "local" | "drive";
+  driveFileId?: string;
+  title: string;
+  movie: string;
+  year: number;
+  hookStart: number;
+  hookEnd: number;
+  savedAt: string;
+  data: AnalyzedAsset;
+}

@@ -133,3 +133,20 @@
     color: var(--color-slate-100) !important;
   }
 }
+
+/* Slide-in notification animation */
+@keyframes slideIn {
+  from {
+    transform: translateY(1.5rem);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slideIn {
+  animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
